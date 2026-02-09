@@ -2529,17 +2529,29 @@ class QEFFAutoModelForCausalLM(QEFFBaseModel):
         bs: int = constants.ONNX_EXPORT_EXAMPLE_BATCH_SIZE
         seq_len: int = constants.ONNX_EXPORT_EXAMPLE_SEQ_LEN
         fbs: int = constants.ONNX_EXPORT_EXAMPLE_FBS
-        kv_cache_shape = get_padding_shape_from_config(
-            self.model.config, fbs if self.continuous_batching else bs, seq_len
-        )
+        kv_cache_shape = get_padding_shape_from_config(self.model.config, fbs if self.continuous_batching else bs, 256)
+        kv_block_size = 32
+        batch, num_kv_heads, CL, dh = kv_cache_shape
+        num_kv_blocks = (-batch * CL) // (-kv_block_size)
+        print("CL in modelling_auto.py = ", CL)
+        print("num_kv_blocks in modelling_auto.py = ", num_kv_blocks)
+        kv_cache_shape = [num_kv_blocks, num_kv_heads, kv_block_size, dh]
         example_inputs = {
             "input_ids": torch.zeros((bs, seq_len), dtype=torch.int64),
             "position_ids": torch.arange(seq_len, dtype=torch.int64).view(1, seq_len).repeat(bs, 1),
+            "block_table": torch.cat(
+                (
+                    torch.arange(num_kv_blocks, dtype=torch.int64).view(num_kv_blocks // bs, bs, 1),
+                    torch.zeros((num_kv_blocks // bs, bs, 1), dtype=torch.int64),
+                ),
+                dim=2,
+            ),
             "past_key_values": [[] for _ in range(self.num_layers)],
         }
         dynamic_axes = {
             "input_ids": {0: "batch_size", 1: "seq_len"},
             "position_ids": {0: "batch_size", 1: "seq_len"},
+            "block_table": {0: "kv_blocks_per_batch", 1: "batch_size"},
         }
         if self.comp_ctx_lengths_prefill is not None:
             example_inputs["comp_ctx_lengths"] = torch.randint(0, 512, (512,), dtype=torch.long)
@@ -2552,8 +2564,10 @@ class QEFFAutoModelForCausalLM(QEFFBaseModel):
             }
         else:  # pkv is 4d
             pkv_dynamic_axes = {
-                0: "full_batch_size" if self.continuous_batching else "batch_size",
-                2: "ctx_len",
+                # 0: "full_batch_size" if self.continuous_batching else "batch_size",
+                # 2: "ctx_len",
+                0: "full_batch_size" if self.continuous_batching else "num_kv_blocks",
+                2: "kv_block_size",
             }
         output_names = []
         if self.model.qaic_config is not None and self.model.qaic_config.get("include_sampler", False):
@@ -2589,7 +2603,7 @@ class QEFFAutoModelForCausalLM(QEFFBaseModel):
             )
 
             for i in range(self.num_layers):
-                pkv_dynamic_axes[i][0] = "full_batch_size" if self.continuous_batching else "batch_size"
+                pkv_dynamic_axes[i][0] = "full_batch_size" if self.continuous_batching else "num_kv_blocks"
                 for kv in ["key", "value"]:
                     example_inputs["past_key_values"][i].append(torch.zeros(kv_cache_shape, dtype=torch.float32))
                     dynamic_axes[f"past_{kv}.{i}"] = pkv_dynamic_axes[i]
@@ -2750,6 +2764,10 @@ class QEFFAutoModelForCausalLM(QEFFBaseModel):
             spec["batch_size"] = kv_cache_batch_size
         if full_batch_size:
             spec["full_batch_exec_size"] = full_batch_size
+        kv_block_size = 32
+        spec["kv_block_size"] = kv_block_size
+        spec["num_kv_blocks"] = (-kv_cache_batch_size * ctx_len) // (-kv_block_size)
+        spec["kv_blocks_per_batch"] = (-ctx_len) // (-kv_block_size)
         return {k: v for k, v in spec.items() if v is not None}
 
     def build_decode_specialization(
@@ -2810,6 +2828,10 @@ class QEFFAutoModelForCausalLM(QEFFBaseModel):
             spec["full_batch_size"] = kv_cache_batch_size
         else:
             spec["batch_size"] = kv_cache_batch_size
+        kv_block_size = 32
+        spec["kv_block_size"] = kv_block_size
+        spec["num_kv_blocks"] = (-kv_cache_batch_size * ctx_len) // (-kv_block_size)
+        spec["kv_blocks_per_batch"] = (-ctx_len) // (-kv_block_size)
         return {k: v for k, v in spec.items() if v is not None}
 
     def compile(

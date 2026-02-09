@@ -40,6 +40,7 @@ def check_qaic_sdk():
 # Conditionally import QAIC-related modules if the SDK is installed
 __version__ = "0.0.1.dev0"
 
+print("check_qaic_sdk = ", check_qaic_sdk())
 if check_qaic_sdk():
     from QEfficient.base import (
         QEFFAutoModel,
