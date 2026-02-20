@@ -157,6 +157,7 @@ class QEffDynamicLayer(DynamicLayer):
         position_ids = cache_kwargs.get("position_ids")
         _, seq_len = position_ids.shape
         batch_index = cache_kwargs.get("batch_index", None)
+        slot_id = cache_kwargs.get("slot_id", None)
         # batch, num_kv_heads, ctx_len, dh = k_out.shape
         num_kv_blocks, num_kv_heads, block_size, dh = k_out.shape
         # block_size = end_index - start_index
@@ -167,12 +168,14 @@ class QEffDynamicLayer(DynamicLayer):
         ctx_indices = torch.arange(block_size)[None, None, ...]
         print("ctx_indices in read_only_pagedAttention = ", ctx_indices)
         # gather_limit = position_ids.max(1, keepdim=True).values.unsqueeze(1)
-        gather_limit = block_index[:, 1].view(1, 1, -1)
+        gather_limit = slot_id.view(1, 1, -1)
         # invalid_mask = ctx_indices >= gather_limit
         print("gather_limit = ", gather_limit)
         print("gather_limit + seq_len = ", gather_limit + seq_len)
-        invalid_mask = torch.where(updated, ctx_indices >= gather_limit + seq_len, ctx_indices >= gather_limit)
-        block_indices = block_index[:, 0].view(-1, 1, 1)
+        # invalid_mask = torch.where(updated, ctx_indices >= gather_limit + seq_len, ctx_indices >= gather_limit)
+        invalid_mask = torch.where(updated, ctx_indices >= gather_limit + seq_len, ctx_indices >= block_size)
+        invalid_mask = torch.where(block_index < 0, ctx_indices >= 0, invalid_mask)
+        block_indices = block_index.view(-1, 1, 1)
         # block_indices = torch.arange(num_kv_blocks)[..., None, None]
         # block_indices = torch.tensor(block_index, dtype=torch.int32)[..., None, None]
         # invalid_mask = block_indices != block_index
@@ -220,9 +223,8 @@ class QEffDynamicLayer(DynamicLayer):
         else:
             position_ids = cache_kwargs.get("position_ids")
             batch_index = cache_kwargs.get("batch_index", None)  # Check and fetch batch index value form the kwargs
-            block_table = cache_kwargs.get(
-                "block_table"
-            )  # [num_kv_blocks/BS, BS, 2] -> last axis 2 refers to (block_id, slot_id)
+            block_table = cache_kwargs.get("block_table")  # [BS, num_kv_blocks/BS] -> each entry is block_id value
+            slot_id = cache_kwargs.get("slot_id")
             batch1, seq_len1 = position_ids.shape
             batch, num_kv_heads, seq_len, dh = key_states.shape
             assert batch == batch1, "batch is not equal to batch1"
@@ -247,8 +249,8 @@ class QEffDynamicLayer(DynamicLayer):
                 print("block_index = ", block_index)
                 # slot_index = ctx_index % block_size
                 invalid_scatter_index = torch.iinfo(torch.int32).max
-                block_id = block_table[block_index[0]][:, 0].view(-1, 1, 1)
-                slot_id = block_table[block_index[0]][0, 1]
+                block_id = block_table[:, block_index[0]].view(-1, 1, 1)
+                slot_id = slot_id
                 print("block_id = ", block_id)
                 print("slot_id = ", slot_id)
                 # ctx_indices = torch.arange(start=slot_id, end=block_size)[None, None, ...]
@@ -256,8 +258,10 @@ class QEffDynamicLayer(DynamicLayer):
                 # ctx_indices = torch.arange(block_size)[None, None, ...]
                 ctx_indices = (torch.arange(seq_len) + slot_id)[None, None, ...]
                 # ctx_indices = torch.where(ctx_indices < slot_id, invalid_scatter_index, ctx_indices)
-                ctx_indices = torch.where(slot_id < 0, invalid_scatter_index, ctx_indices)
+                ctx_indices = torch.where(block_id < 0, invalid_scatter_index, ctx_indices)
+                print("ctx_indices after where = ", ctx_indices)
                 # ctx_indices = torch.where(ctx_indices > slot_id + seq_len - 1, invalid_scatter_index, ctx_indices)
+                print("key_states = ", key_states)
                 self.keys = CtxScatterFuncPagedAttention.apply(self.keys, block_id, ctx_indices, key_states)
                 self.values = CtxScatterFuncPagedAttention.apply(self.values, block_id, ctx_indices, value_states)
                 # slot_len = block_size - slot_id

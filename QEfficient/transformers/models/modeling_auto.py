@@ -2539,19 +2539,25 @@ class QEFFAutoModelForCausalLM(QEFFBaseModel):
         example_inputs = {
             "input_ids": torch.zeros((bs, seq_len), dtype=torch.int64),
             "position_ids": torch.arange(seq_len, dtype=torch.int64).view(1, seq_len).repeat(bs, 1),
-            "block_table": torch.cat(
-                (
-                    torch.arange(num_kv_blocks, dtype=torch.int64).view(num_kv_blocks // bs, bs, 1),
-                    torch.zeros((num_kv_blocks // bs, bs, 1), dtype=torch.int64),
-                ),
-                dim=2,
+            # "block_table": torch.arange(num_kv_blocks, dtype=torch.int64).view(bs, num_kv_blocks // bs),
+            "block_table": torch.tensor([0, -1, -1, -1, -1, -1, -1, -1], dtype=torch.int64).view(
+                bs, num_kv_blocks // bs
             ),
+            "slot_id": torch.zeros(bs, dtype=torch.int64),
+            # "block_table": torch.cat(
+            #    (
+            #        torch.arange(num_kv_blocks, dtype=torch.int64).view(num_kv_blocks // bs, bs, 1),
+            #        torch.zeros((num_kv_blocks // bs, bs, 1), dtype=torch.int64),
+            #    ),
+            #    dim=2,
+            # ),
             "past_key_values": [[] for _ in range(self.num_layers)],
         }
         dynamic_axes = {
             "input_ids": {0: "batch_size", 1: "seq_len"},
             "position_ids": {0: "batch_size", 1: "seq_len"},
-            "block_table": {0: "kv_blocks_per_batch", 1: "batch_size"},
+            "block_table": {0: "batch_size", 1: "kv_blocks_per_batch"},
+            "slot_id": {0: "batch_size"},
         }
         if self.comp_ctx_lengths_prefill is not None:
             example_inputs["comp_ctx_lengths"] = torch.randint(0, 512, (512,), dtype=torch.long)

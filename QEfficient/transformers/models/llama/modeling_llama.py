@@ -224,9 +224,7 @@ def eager_attention_forward_pagedAttention(
 
     past_seen_tokens = cache_kwargs.get("past_seen_tokens")
     position_ids = cache_kwargs.get("position_ids")
-    block_table = cache_kwargs.get(
-        "block_table"
-    )  # [num_kv_blocks/BS, BS, 2] -> last axis 2 refers to (block_id, slot_id)
+    block_table = cache_kwargs.get("block_table")  # [BS, num_kv_blocks/BS] -> each entry is block_id value
     # block_size = -(-past_seen_tokens // num_kv_blocks)
     block_size = 32
     # num_kv_blocks = 8
@@ -240,8 +238,9 @@ def eager_attention_forward_pagedAttention(
     for i in range(num_kv_blocks):
         start_index = i * block_size
         end_index = (i + 1) * block_size
-        block_index = block_table[i]
+        block_index = block_table[:, i]
         print("torch.max(position_ids) = ", torch.max(position_ids))
+        print("block_index = ", block_index)
         updated = (torch.max(position_ids) // block_size) == i
         # K_block, V_block = past_key_value.read_only_pagedAttention(start_index, end_index, layer_idx, cache_kwargs)
         K_block, V_block = past_key_value.read_only_pagedAttention(block_index, updated, layer_idx, cache_kwargs)
@@ -307,6 +306,7 @@ class QEffLlamaAttention(LlamaAttention):
         attention_mask: Optional[torch.Tensor],
         position_ids: Optional[torch.LongTensor] = None,
         block_table: Optional[torch.LongTensor] = None,
+        slot_id: Optional[torch.LongTensor] = None,
         past_key_value: Optional[Cache] = None,
         comp_ctx_lengths: Optional[torch.LongTensor] = None,
         batch_index: Optional[torch.LongTensor] = None,
@@ -346,6 +346,7 @@ class QEffLlamaAttention(LlamaAttention):
                     "batch_index": batch_index,
                     "position_ids": position_ids,
                     "block_table": block_table,
+                    "slot_id": slot_id,
                     "past_seen_tokens": past_seen_tokens,
                 }
                 past_key_value.write_only(key_states, value_states, self.layer_idx, cache_kwargs)
@@ -394,6 +395,7 @@ class QEffLlamaDecoderLayer(LlamaDecoderLayer):
         attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
         block_table: Optional[torch.LongTensor] = None,
+        slot_id: Optional[torch.LongTensor] = None,
         past_key_value: Optional[Cache] = None,
         comp_ctx_lengths: Optional[torch.LongTensor] = None,
         batch_index: Optional[torch.LongTensor] = None,
@@ -411,6 +413,7 @@ class QEffLlamaDecoderLayer(LlamaDecoderLayer):
             attention_mask=attention_mask,
             position_ids=position_ids,
             block_table=block_table,
+            slot_id=slot_id,
             past_key_value=past_key_value,
             comp_ctx_lengths=comp_ctx_lengths,
             batch_index=batch_index,
@@ -440,6 +443,7 @@ class QEffLlamaModel(LlamaModel):
         attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
         block_table: Optional[torch.LongTensor] = None,
+        slot_id: Optional[torch.LongTensor] = None,
         past_key_values: Optional[Cache] = None,
         comp_ctx_lengths: Optional[torch.LongTensor] = None,
         batch_index: Optional[torch.LongTensor] = None,
@@ -494,6 +498,7 @@ class QEffLlamaModel(LlamaModel):
                 attention_mask=causal_mask,
                 position_ids=position_ids,
                 block_table=block_table,
+                slot_id=slot_id,
                 past_key_value=past_key_values,
                 comp_ctx_lengths=comp_ctx_lengths,
                 batch_index=batch_index,
@@ -529,6 +534,7 @@ class QEffLlamaForCausalLM(LlamaForCausalLM):
         attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
         block_table: Optional[torch.LongTensor] = None,
+        slot_id: Optional[torch.LongTensor] = None,
         past_key_values: Optional[Union[Cache, List[torch.FloatTensor]]] = None,
         comp_ctx_lengths: Optional[torch.LongTensor] = None,
         batch_index: Optional[torch.LongTensor] = None,
@@ -547,6 +553,7 @@ class QEffLlamaForCausalLM(LlamaForCausalLM):
             attention_mask=attention_mask,
             position_ids=position_ids,
             block_table=block_table,
+            slot_id=slot_id,
             past_key_values=past_key_values,
             comp_ctx_lengths=comp_ctx_lengths,
             batch_index=batch_index,

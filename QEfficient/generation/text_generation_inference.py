@@ -615,11 +615,12 @@ class QEffTextGenerationBase:
         decode_inputs = {}
 
         num_kv_blocks = 8
-        block_id = np.arange(num_kv_blocks, dtype=np.int64).reshape(num_kv_blocks // 1, 1, 1)
-        slot_id_full = np.full((1, 1, 1), 32, dtype=np.int64)
-        slot_id_empty = np.zeros((7, 1, 1), dtype=np.int64)
-        slot_id = np.concatenate((slot_id_full, slot_id_empty), axis=0)
-        decode_inputs["block_table"] = np.concatenate((block_id, slot_id), axis=2)
+        # decode_inputs["block_table"] = np.arange(num_kv_blocks, dtype=np.int64).reshape(1, num_kv_blocks // 1)
+        decode_inputs["block_table"] = np.array([0, 1, -1, -1, -1, -1, -1, -1]).reshape(1, num_kv_blocks // 1)
+        # slot_id_full = np.full((1, 1), 32, dtype=np.int64)
+        decode_inputs["slot_id"] = np.zeros((1), dtype=np.int64)
+        # decode_inputs["slot_id"] = np.concatenate((slot_id_full, slot_id_empty), axis=1)
+        # decode_inputs["block_table"] = np.concatenate((block_id, slot_id), axis=2)
 
         if self.is_tlm:
             position_ids = np.full((batch_size, self._decode_seq_len), -1, dtype=np.int64)
@@ -804,9 +805,10 @@ class QEffTextGenerationBase:
         inputs.pop("token_type_ids", None)
 
         num_kv_blocks = 8
-        block_id = np.arange(num_kv_blocks, dtype=np.int64).reshape(num_kv_blocks // 1, 1, 1)
-        slot_id = np.zeros((num_kv_blocks // 1, 1, 1), dtype=np.int64)
-        inputs["block_table"] = np.concatenate((block_id, slot_id), axis=2)
+        # inputs["block_table"] = np.arange(num_kv_blocks, dtype=np.int64).reshape(1, num_kv_blocks // 1)
+        inputs["block_table"] = np.array([0, -1, -1, -1, -1, -1, -1, -1]).reshape(1, num_kv_blocks // 1)
+        inputs["slot_id"] = np.zeros((1), dtype=np.int64)
+        # inputs["block_table"] = np.concatenate((block_id, slot_id), axis=2)
 
         if decode_batch_id is not None:
             inputs["batch_index"] = decode_batch_id
@@ -853,7 +855,8 @@ class QEffTextGenerationBase:
             # print("chunk_inputs = ", chunk_inputs)
             outputs = self._session.run(chunk_inputs)
 
-            if self._write_io_dir is not None:
+            # if self._write_io_dir is not None:
+            if 1:
                 write_io_files(inputs, outputs, self._write_io_dir, "prefill", "aic_batch_io", True, False)
         # print("prefill outputs = ", outputs)
         return (
@@ -1021,6 +1024,8 @@ class QEffTextGenerationBase:
             # print('= ', decode_inputs["position_ids"])
             # print('\ndecode_inputs["block_table"] in decode iteration ', num_token)
             # print('= ', decode_inputs["block_table"])
+            # print('\ndecode_inputs["slot_id"] in decode iteration ', num_token)
+            # print('= ', decode_inputs["slot_id"])
             if self.comp_ctx_lengths_decode is not None:
                 if cache_index >= self.comp_ctx_lengths_decode[ccl_id] - 1:
                     ccl_id = min(ccl_id + 1, max_ccl_id)
@@ -1037,7 +1042,7 @@ class QEffTextGenerationBase:
             # Prepare inputs for next iteration
             decode_inputs["input_ids"] = self._fetch_next_token_id(outputs)
             decode_inputs["position_ids"][:, -1] += 1
-            decode_inputs["block_table"][1, :, -1] += 1
+            decode_inputs["slot_id"][-1] += 1
             cache_index += 1
             self.generated_ids[:, num_token] = decode_inputs["input_ids"][:, -1]
             finished_sequences |= decode_inputs["input_ids"] == self.tokenizer.eos_token_id
