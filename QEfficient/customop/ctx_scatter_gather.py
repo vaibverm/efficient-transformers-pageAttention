@@ -63,7 +63,7 @@ def CtxScatterPagedAttention(
     # Find dims
     num_blocks = ops.Gather(ops.Shape(block_index), [0])
     num_heads = ops.Gather(ops.Shape(data), [1])
-    seq_len = ops.Gather(ops.Shape(position_ids), [2])
+    seq_len = ops.Gather(ops.Shape(position_ids), [1])
 
     # Expanded shape to create indices
     zero = ops.Constant(value_ints=[0])
@@ -74,7 +74,7 @@ def CtxScatterPagedAttention(
     # block_idx = ops.Expand(ops.Unsqueeze(ops.Range(zero, num_blocks, one), [1, 2, 3]), exp_shape)
     block_idx = ops.Expand(ops.Unsqueeze(block_index, [3]), exp_shape)
     head_idx = ops.Expand(ops.Unsqueeze(ops.Range(zero, num_heads, one), [0, 2, 3]), exp_shape)
-    ctx_idx = ops.Expand(ops.Unsqueeze(position_ids, [3]), exp_shape)
+    ctx_idx = ops.Expand(ops.Unsqueeze(position_ids, [1, 3]), exp_shape)
     indices = ops.Concat(block_idx, head_idx, ctx_idx, axis=3)
 
     return ops.ScatterND(data, indices, updates)
@@ -93,7 +93,8 @@ class CtxScatterFuncPagedAttention(torch.autograd.Function):
         # print("data.shape[0] from CtxScatterFuncPagedAttention = ", data.shape[0])
         head_idx = torch.arange(data.shape[1]).view(1, -1, 1)
         # ctx_idx = (position_ids.unsqueeze(0)).unsqueeze(1)
-        ctx_idx = position_ids.view(1, 1, -1)
+        # ctx_idx = position_ids.view(1, 1, -1)
+        ctx_idx = position_ids.unsqueeze(1)
         print("block_index shape from CtxScatterFuncPagedAttention = ", block_index.shape)
         print("head_idx shape from CtxScatterFuncPagedAttention = ", head_idx.shape)
         print("ctx_idx shape from CtxScatterFuncPagedAttention = ", ctx_idx.shape)
@@ -235,7 +236,7 @@ def CtxGatherPagedAttention(
 ) -> onnxscript.FLOAT:
     num_kv_blocks = ops.Gather(ops.Shape(block_indices), [0])
     num_heads = ops.Gather(ops.Shape(data), [1])
-    seq_len = ops.Gather(ops.Shape(ctx_indices), [2])
+    seq_len = ops.Gather(ops.Shape(ctx_indices), [1])
 
     # Expanded shape to create indices
     zero = ops.Constant(value_ints=[0])
@@ -243,9 +244,9 @@ def CtxGatherPagedAttention(
     exp_shape = ops.Concat(num_kv_blocks, num_heads, seq_len, one, axis=0)
 
     # Create indices
-    block_idx = ops.Expand(ops.Unsqueeze(block_indices, [3]), exp_shape)
+    block_idx = ops.Expand(ops.Unsqueeze(block_indices, [1, 3]), exp_shape)
     head_idx = ops.Expand(ops.Unsqueeze(ops.Range(zero, num_heads, one), [0, 2, 3]), exp_shape)
-    ctx_idx = ops.Expand(ops.Unsqueeze(ctx_indices, [3]), exp_shape)
+    ctx_idx = ops.Expand(ops.Unsqueeze(ctx_indices, [1, 3]), exp_shape)
     indices = ops.Concat(block_idx, head_idx, ctx_idx, axis=3)
 
     return ops.GatherND(data, indices)
@@ -262,7 +263,8 @@ class CtxGatherFuncPagedAttention(torch.autograd.Function):
         block_indices = block_indices.view(-1, 1, 1)
         head_indices = torch.arange(data.shape[1]).view(1, -1, 1)
         # ctx_indices = torch.arange(data.shape[2]).view(1, 1, -1)
-        ctx_indices = ctx_indices.view(1, 1, -1)
+        # ctx_indices = ctx_indices.view(1, 1, -1)
+        ctx_indices = ctx_indices.unsqueeze(1)
         print("ctx_indices in CtxGatherFuncPagedAttention = ", ctx_indices)
         return data[block_indices, head_indices, ctx_indices]
 

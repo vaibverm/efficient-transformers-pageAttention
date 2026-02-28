@@ -2526,7 +2526,8 @@ class QEFFAutoModelForCausalLM(QEFFBaseModel):
         str
             Path to the generated ONNX graph file.
         """
-        bs: int = constants.ONNX_EXPORT_EXAMPLE_BATCH_SIZE
+        # bs: int = constants.ONNX_EXPORT_EXAMPLE_BATCH_SIZE
+        bs: int = 2
         seq_len: int = constants.ONNX_EXPORT_EXAMPLE_SEQ_LEN
         fbs: int = constants.ONNX_EXPORT_EXAMPLE_FBS
         kv_cache_shape = get_padding_shape_from_config(self.model.config, fbs if self.continuous_batching else bs, 256)
@@ -2540,9 +2541,12 @@ class QEFFAutoModelForCausalLM(QEFFBaseModel):
             "input_ids": torch.zeros((bs, seq_len), dtype=torch.int64),
             "position_ids": torch.arange(seq_len, dtype=torch.int64).view(1, seq_len).repeat(bs, 1),
             # "block_table": torch.arange(num_kv_blocks, dtype=torch.int64).view(bs, num_kv_blocks // bs),
-            "block_table": torch.tensor([0, -1, -1, -1, -1, -1, -1, -1], dtype=torch.int64).view(
-                bs, num_kv_blocks // bs
-            ),
+            "block_table": torch.tensor(
+                [[0, -1, -1, -1, -1, -1, -1, -1], [0, -1, -1, -1, -1, -1, -1, -1]], dtype=torch.int64
+            ).view(bs, num_kv_blocks // bs),
+            # "block_table": torch.tensor([0, -1, -1, -1, -1, -1, -1, -1], dtype=torch.int64).view(
+            # bs, num_kv_blocks // bs
+            # ),
             "slot_id": torch.zeros(bs, dtype=torch.int64),
             # "block_table": torch.cat(
             #    (

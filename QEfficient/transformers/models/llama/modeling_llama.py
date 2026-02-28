@@ -228,7 +228,8 @@ def eager_attention_forward_pagedAttention(
     # block_size = -(-past_seen_tokens // num_kv_blocks)
     block_size = 32
     # num_kv_blocks = 8
-    num_kv_blocks = -(batch_size * past_seen_tokens) // (-block_size)
+    # num_kv_blocks = -(batch_size * past_seen_tokens) // (-block_size)
+    num_kv_blocks = -(past_seen_tokens) // (-block_size)
     print("num_kv_blocks = ", num_kv_blocks)
     masked_tensor = torch.tensor(MIN_MASKED_ATTENTION_VALUE, dtype=torch.float32)
     # ctx_index = position_ids[0]
