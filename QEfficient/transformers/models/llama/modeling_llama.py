@@ -205,7 +205,7 @@ def eager_attention_forward_pagedAttention(
     value: torch.Tensor,
     attention_mask: Optional[torch.Tensor],
     scaling: float,
-    num_kv_blocks: Optional[torch.Tensor] = None,
+    num_kv_blocks_per_batch: Optional[torch.Tensor] = None,
     cache_kwargs: Optional[Dict[str, Any]] = None,
     layer_idx: int = None,
     past_key_value: Optional[Cache] = None,
@@ -226,23 +226,31 @@ def eager_attention_forward_pagedAttention(
     position_ids = cache_kwargs.get("position_ids")
     block_table = cache_kwargs.get("block_table")  # [BS, num_kv_blocks/BS] -> each entry is block_id value
     # block_size = -(-past_seen_tokens // num_kv_blocks)
-    block_size = 32
+    # block_size = 32
     # num_kv_blocks = 8
     # num_kv_blocks = -(batch_size * past_seen_tokens) // (-block_size)
-    num_kv_blocks = -(past_seen_tokens) // (-block_size)
+    # num_kv_blocks = -(past_seen_tokens) // (-block_size)
+    num_kv_blocks = num_kv_blocks_per_batch * batch_size
+    block_size = -(past_seen_tokens) // (-num_kv_blocks_per_batch)
+    print("block_size in eager_attention_forward_pagedAttention = ", block_size)
+    print("past_seen_tokens in eager_attention_forward_pagedAttention = ", past_seen_tokens)
+    print("batch_size = ", batch_size)
     print("num_kv_blocks = ", num_kv_blocks)
+    print("num_kv_blocks_per_batch = ", num_kv_blocks_per_batch)
     masked_tensor = torch.tensor(MIN_MASKED_ATTENTION_VALUE, dtype=torch.float32)
     # ctx_index = position_ids[0]
     # block_index = ctx_index // block_size
     # slot_index = ctx_index % block_size
 
-    for i in range(num_kv_blocks):
+    for i in range(num_kv_blocks_per_batch):
         start_index = i * block_size
         end_index = (i + 1) * block_size
         block_index = block_table[:, i]
-        print("torch.max(position_ids) = ", torch.max(position_ids))
+        print("position_ids.max(1, keepdim=True).values = ", position_ids.max(1, keepdim=True).values)
         print("block_index = ", block_index)
-        updated = (torch.max(position_ids) // block_size) == i
+        # updated = (torch.max(position_ids) // block_size) == i
+        updated = (position_ids.max(1, keepdim=True).values // block_size) == i
+        print("updated = ", updated)
         # K_block, V_block = past_key_value.read_only_pagedAttention(start_index, end_index, layer_idx, cache_kwargs)
         K_block, V_block = past_key_value.read_only_pagedAttention(block_index, updated, layer_idx, cache_kwargs)
         print("K_block shape before reshape = ", K_block.shape)
@@ -253,8 +261,13 @@ def eager_attention_forward_pagedAttention(
         V_block_states = repeat_kv(V_block, module.num_key_value_groups)
         print("K_block shape after repeat_kv = ", K_block_states.shape)
         past_seen_tokens_start = start_index
+        # past_seen_tokens_end = torch.where(
+        #    torch.tensor(past_seen_tokens, dtype=torch.int) < torch.tensor(end_index, dtype=torch.int),
+        #    past_seen_tokens,
+        #    end_index,
+        # )
         past_seen_tokens_end = torch.where(
-            torch.tensor(past_seen_tokens, dtype=torch.int) < torch.tensor(end_index, dtype=torch.int),
+            past_seen_tokens < end_index,
             past_seen_tokens,
             end_index,
         )
@@ -313,13 +326,11 @@ class QEffLlamaAttention(LlamaAttention):
         batch_index: Optional[torch.LongTensor] = None,
         use_cache: bool = False,
         cache_position: Optional[torch.LongTensor] = None,
-        num_kv_blocks: Optional[torch.Tensor] = None,
+        num_kv_blocks_per_batch: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
         input_shape = hidden_states.shape[:-1]
         hidden_shape = (*input_shape, -1, self.head_dim)
-        print("hidden_shape = ", hidden_shape)
-        print("input_shape = ", input_shape)
 
         kwargs.pop("output_attentions", None)
         kwargs.pop("return_dict", None)
@@ -329,20 +340,21 @@ class QEffLlamaAttention(LlamaAttention):
         query_states = self.q_proj(hidden_states, **kwargs).view(hidden_shape).transpose(1, 2)
         key_states = self.k_proj(hidden_states, **kwargs).view(hidden_shape).transpose(1, 2)
         value_states = self.v_proj(hidden_states, **kwargs).view(hidden_shape).transpose(1, 2)
-        print("query_states shape = ", query_states.shape)
-        print("key_states shape = ", key_states.shape)
-        print("value_states shape = ", value_states.shape)
 
+        # kv_seq_len = past_key_value.get_seq_lengthPagedAttention(self.layer_idx, cache_position)
+        # kv_seq_len = kv_seq_len // query_states.shape[0]
         kv_seq_len = past_key_value.get_seq_length(self.layer_idx, cache_position)
-        kv_seq_len = kv_seq_len // query_states.shape[0]
+        kv_seq_len = kv_seq_len * num_kv_blocks_per_batch
+        # past_seen_tokens = past_key_value.get_seq_lengthPagedAttention() if past_key_value is not None else 0
+        # past_seen_tokens = past_seen_tokens // query_states.shape[0]
         past_seen_tokens = past_key_value.get_seq_length() if past_key_value is not None else 0
-        past_seen_tokens = past_seen_tokens // query_states.shape[0]
+        past_seen_tokens = past_seen_tokens * num_kv_blocks_per_batch
         cos, sin = self.rotary_emb(value_states, seq_len=kv_seq_len)
         query_states, key_states = qeff_apply_rotary_pos_emb(query_states, key_states, cos, sin, position_ids)
         print("key_states shape = ", key_states.shape)
 
         if past_key_value is not None:
-            if num_kv_blocks is not None:
+            if num_kv_blocks_per_batch is not None:
                 cache_kwargs = {
                     "batch_index": batch_index,
                     "position_ids": position_ids,
@@ -358,7 +370,7 @@ class QEffLlamaAttention(LlamaAttention):
                     cache_kwargs["CCL"] = attention_mask.shape[-1]
                 key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
 
-        if num_kv_blocks is not None:
+        if num_kv_blocks_per_batch is not None:
             # attention_interface = eager_attention_forward_blockedKV
             attention_interface = eager_attention_forward_pagedAttention
         else:
@@ -371,7 +383,7 @@ class QEffLlamaAttention(LlamaAttention):
             value_states,
             attention_mask,
             scaling=self.scaling,
-            num_kv_blocks=num_kv_blocks,
+            num_kv_blocks_per_batch=num_kv_blocks_per_batch,
             cache_kwargs=cache_kwargs,
             layer_idx=self.layer_idx,
             past_key_value=past_key_value,
@@ -471,7 +483,7 @@ class QEffLlamaModel(LlamaModel):
             past_key_values = QEffDynamicCache.from_legacy_cache(past_key_values)
 
         if cache_position is None:
-            past_seen_tokens = past_key_values.get_seq_length() if past_key_values is not None else 0
+            past_seen_tokens = past_key_values.get_seq_lengthPagedAttention() if past_key_values is not None else 0
             print("past_seen_tokens = ", past_seen_tokens)
             cache_position = torch.arange(
                 past_seen_tokens, past_seen_tokens + inputs_embeds.shape[1], device=inputs_embeds.device

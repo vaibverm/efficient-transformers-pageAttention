@@ -156,7 +156,7 @@ class QEffDynamicLayer(DynamicLayer):
         k_out, v_out = self.keys, self.values
         position_ids = cache_kwargs.get("position_ids")
         batch, seq_len = position_ids.shape
-        batch_index = cache_kwargs.get("batch_index", None)
+        # batch_index = cache_kwargs.get("batch_index", None)
         slot_id = cache_kwargs.get("slot_id", None)
         # batch, num_kv_heads, ctx_len, dh = k_out.shape
         num_kv_blocks, num_kv_heads, block_size, dh = k_out.shape
@@ -170,26 +170,35 @@ class QEffDynamicLayer(DynamicLayer):
         print("ctx_indices in read_only_pagedAttention = ", ctx_indices)
         # gather_limit = position_ids.max(1, keepdim=True).values.unsqueeze(1)
         # gather_limit = slot_id.view(1, 1, -1)
-        gather_limit = slot_id.unsqueeze(-1)
+        # gather_limit = slot_id.unsqueeze(-1)
+        gather_limit = torch.where(updated, slot_id.unsqueeze(-1) + seq_len, block_size)
         # invalid_mask = ctx_indices >= gather_limit
         print("gather_limit = ", gather_limit)
-        print("gather_limit + seq_len = ", gather_limit + seq_len)
+        print("gather_limit shape = ", gather_limit.shape)
+        # print("gather_limit + seq_len = ", gather_limit + seq_len)
         # invalid_mask = torch.where(updated, ctx_indices >= gather_limit + seq_len, ctx_indices >= gather_limit)
-        invalid_mask = torch.where(updated, ctx_indices >= gather_limit + seq_len, ctx_indices >= block_size)
-        print("invalid mask 1 = ", invalid_mask)
+        # Assumption for below is that all blocks before the current block all full, no partially filled blocks other than currently written block
+        # invalid_mask = torch.where(updated, ctx_indices >= gather_limit + seq_len, ctx_indices >= block_size)
+        # print("updated = ", updated)
+        # print("ctx_indices = ", ctx_indices)
+        # print("block_size = ", block_size)
+        # print("invalid mask 1 = ", invalid_mask)
         block_indices = block_index.unsqueeze(-1)
-        print("invalid_mask shape = ", invalid_mask.shape)
+        # print("invalid_mask shape = ", invalid_mask.shape)
         print("block_indices shape = ", block_indices.shape)
         print("ctx_indices shape = ", ctx_indices.shape)
-        invalid_mask = torch.where(block_indices < 0, ctx_indices >= 0, invalid_mask)
-        print("invalid mask 2 = ", invalid_mask)
+        # invalid_mask = torch.where(block_indices < 0, ctx_indices >= 0, ctx_indices >= gather_limit)
+        invalid_mask = torch.ones_like(position_ids, dtype=torch.bool)
+        invalid_mask = torch.where(block_indices < 0, invalid_mask, ctx_indices >= gather_limit)
+        print("invalid mask = ", invalid_mask)
+        print("invalid mask shape = ", invalid_mask.shape)
         # block_indices = torch.arange(num_kv_blocks)[..., None, None]
         # block_indices = torch.tensor(block_index, dtype=torch.int32)[..., None, None]
         # invalid_mask = block_indices != block_index
 
         if torch.onnx.is_in_onnx_export():
-            # invalid_idx_value = torch.iinfo(torch.int32).max
-            invalid_idx_value = -2
+            invalid_idx_value = torch.iinfo(torch.int32).max
+            # invalid_idx_value = -2
         else:
             invalid_idx_value = 0
 
@@ -197,10 +206,15 @@ class QEffDynamicLayer(DynamicLayer):
         # ctx_indices = torch.where(invalid_mask, invalid_idx_value, (ctx_indices % block_size))
         ctx_indices = torch.where(invalid_mask, invalid_idx_value, ctx_indices)
 
-        if batch_index is not None:
-            k_out = CtxGatherFuncBlockedKVCB.apply(k_out, batch_index, ctx_indices)
-            v_out = CtxGatherFuncBlockedKVCB.apply(v_out, batch_index, ctx_indices)
-        else:
+        #        if batch_index is not None:
+        #            #k_out = CtxGatherFuncBlockedKVCB.apply(k_out, batch_index, ctx_indices)
+        #            #v_out = CtxGatherFuncBlockedKVCB.apply(v_out, batch_index, ctx_indices)
+        #            k_out = CtxGatherFuncPagedAttention.apply(k_out, block_indices, ctx_indices)
+        #            print("k_out in read_onlyPagedAttention = ", k_out)
+        #            print("k_out shape in read_onlyPagedAttention = ", k_out.shape)
+        #            v_out = CtxGatherFuncPagedAttention.apply(v_out, block_indices, ctx_indices)
+        # else:
+        if 1:
             # block_indices = block_indices.expand(num_kv_blocks, num_kv_heads, ctx_indices.shape[-1])
             print("ctx_indices in read_onlyPagedAttention = ", ctx_indices)
             k_out = CtxGatherFuncPagedAttention.apply(k_out, block_indices, ctx_indices)
@@ -231,51 +245,65 @@ class QEffDynamicLayer(DynamicLayer):
             self.values = value_states
         else:
             position_ids = cache_kwargs.get("position_ids")
-            batch_index = cache_kwargs.get("batch_index", None)  # Check and fetch batch index value form the kwargs
+            # batch_index = cache_kwargs.get("batch_index", None)  # Check and fetch batch index value form the kwargs
             block_table = cache_kwargs.get("block_table")  # [BS, num_kv_blocks/BS] -> each entry is block_id value
             slot_id = cache_kwargs.get("slot_id")
             print("block_table = ", block_table)
             print("slot_id = ", slot_id)
-            batch1, seq_len1 = position_ids.shape
+            # batch1, seq_len1 = position_ids.shape
             batch, num_kv_heads, seq_len, dh = key_states.shape
-            assert batch == batch1, "batch is not equal to batch1"
-            assert seq_len == seq_len1, "seq_len is not equal to seq_len1"
+            # assert batch == batch1, "batch is not equal to batch1"
+            # assert seq_len == seq_len1, "seq_len is not equal to seq_len1"
             print("key_states.shape before view = ", key_states.shape)
             num_kv_blocks, num_kv_heads, block_size, dh = self.keys.shape
             # key_states = key_states.view(-1, num_kv_heads, block_size, dh)
             # print("key_states.shape after view = ", key_states.shape)
             # value_states = value_states.view(-1, num_kv_heads, block_size, dh)
+            # ctx_index = position_ids[0]
+            block_index = position_ids[:, -1] // block_size  # Assuming only 1 block is written at max
+            print("position_ids in write_only = ", position_ids)
+            print("block_index = ", block_index)
+            print("position_ids shape in write_only = ", position_ids.shape)
+            print("block_index shape = ", block_index.shape)
+            # slot_index = ctx_index % block_size
+            invalid_scatter_index = torch.iinfo(torch.int32).max
+            # block_id = block_table[:, block_index[0]].view(-1, 1, 1)
+            ctx_indices = torch.arange(seq_len) + slot_id.unsqueeze(-1)
+            print("ctx_indices before where = ", ctx_indices)
 
             # Scatter
-            if batch_index is not None:
-                invalid_scatter_index = torch.iinfo(torch.int32).max
-                scatter_position_ids = torch.where(position_ids < 0, invalid_scatter_index, position_ids)
+            # if batch_index is not None:
+            #    #scatter_position_ids = torch.where(position_ids < 0, invalid_scatter_index, position_ids)
 
-                self.keys = CtxScatterFuncCB.apply(self.keys, batch_index, scatter_position_ids, key_states)
-                self.values = CtxScatterFuncCB.apply(self.values, batch_index, scatter_position_ids, value_states)
-            else:
-                # ctx_index = position_ids[0]
-                block_index = position_ids[:, -1] // block_size  # Assuming only 1 block is written at max
-                print("position_ids in write_only = ", position_ids)
-                print("block_index = ", block_index)
-                print("position_ids shape in write_only = ", position_ids.shape)
-                print("block_index shape = ", block_index.shape)
-                # slot_index = ctx_index % block_size
-                invalid_scatter_index = torch.iinfo(torch.int32).max
-                # block_id = block_table[:, block_index[0]].view(-1, 1, 1)
+            #    #self.keys = CtxScatterFuncCB.apply(self.keys, batch_index, scatter_position_ids, key_states)
+            #    #self.values = CtxScatterFuncCB.apply(self.values, batch_index, scatter_position_ids, value_states)
+
+            #    #block_id = block_table[batch_index.squeeze(1), block_index].unsqueeze(-1)
+            #    block_id = block_table[batch_index.squeeze(1), block_index].unsqueeze(-1)
+            #    print("batch_index = ", batch_index)
+            #    print("batch_index shape = ", batch_index.shape)
+            #    print("block_id before unsqueeze = ", block_id)
+            #    ctx_indices = torch.where(block_id < 0, invalid_scatter_index, ctx_indices)
+            #    print("ctx_indices after where = ", ctx_indices)
+            #    block_id = block_id.unsqueeze(-1)
+            #    print("block_id after view = ", block_id)
+            #    print("key_states in write_only = ", key_states)
+            #    print("key_states shape in write_only = ", key_states.shape)
+            #    self.keys = CtxScatterFuncPagedAttentionCB.apply(self.keys, block_id, ctx_indices, key_states)
+            #    self.values = CtxScatterFuncPagedAttentionCB.apply(self.values, block_id, ctx_indices, value_states)
+
+            if 1:
                 rows = torch.arange(batch)
                 block_id = block_table[rows, block_index].unsqueeze(-1)
                 # print("block_table[block_index] = ", block_table[block_index])
                 # block_id = block_table[:, block_index].view(-1, 1, 1)
-                slot_id = slot_id
+                # slot_id = slot_id
                 print("block_id before view = ", block_id)
-                print("slot_id = ", slot_id)
+                # print("slot_id = ", slot_id)
                 # ctx_indices = torch.arange(start=slot_id, end=block_size)[None, None, ...]
                 # ctx_indices = (torch.arange(block_size)[slot_id:])[None, None, ...]
                 # ctx_indices = torch.arange(block_size)[None, None, ...]
                 # ctx_indices = (torch.arange(seq_len) + slot_id)[None, None, ...]
-                ctx_indices = torch.arange(seq_len) + slot_id.unsqueeze(-1)
-                print("ctx_indices before where = ", ctx_indices)
                 # ctx_indices = (torch.arange(seq_len))[batch, ...] + slot_id.unsqueeze(-1)
                 # ctx_indices = (torch.arange(seq_len))[batch, ...] + slot_id
                 # ctx_indices = torch.where(ctx_indices < slot_id, invalid_scatter_index, ctx_indices)
@@ -296,6 +324,14 @@ class QEffDynamicLayer(DynamicLayer):
                 #    self.values = CtxScatterFuncPagedAttention.apply(self.values, block_id, ctx_indices, value_states[:,:,start_index:end_index,:])
                 # self.keys = torch.where(end_index < ctx_index.max(0, keepdim=False).values, CtxScatterFuncPagedAttention.apply(self.keys, block_id, ctx_indices, key_states[:,:,start_index:end_index,:]), self.keys)
                 # self.values = torch.where(end_index < ctx_index.max(0, keepdim=False).values, CtxScatterFuncPagedAttention.apply(self.values, block_id, ctx_indices, key_states[:,:,start_index:end_index,:]), self.values)
+
+    def get_seq_lengthPagedAttention(self, cache_position=None) -> int:
+        """Returns the sequence length of the cached states."""
+        print("Reached get_seq_lengthPagedAttention !!!!!!!!!!!!!!!!")
+        if self.keys is None or self.keys.numel() == 0:
+            return 0
+        return self.keys.shape[-2] * self.keys.shape[0]
+        # return self.keys.shape[-2]
 
     def update(
         self,
@@ -519,6 +555,15 @@ class QEffDynamicCache(DynamicCache):
         """
         self.append_new_layers(layer_idx)
         return self.layers[layer_idx].write_only(key_states, value_states, cache_kwargs)
+
+    def get_seq_lengthPagedAttention(self, layer_idx: int = 0, cache_position=None) -> int:
+        """Returns the sequence length of the cache for the given layer. TODO: deprecate in favor of cache_position"""
+        if layer_idx >= len(self.layers):
+            return 0
+        # Hack since QuantizedCache messes with keys shape as it becomes the residual cache
+        # if self.cache_processor is not None and isinstance(self.cache_processor, QuantizedCacheProcessor):
+        # return self.cache_processor.erased_length + self.layers[layer_idx].get_seq_length(cache_position)
+        return self.layers[layer_idx].get_seq_lengthPagedAttention(cache_position)
 
     # TODO:This function will be depercated in future.
     def update3D(

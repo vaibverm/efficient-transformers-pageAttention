@@ -850,7 +850,7 @@ def get_decoder_layer_classes_for_export(model: nn.Module) -> set:
     return model_decoder_classes
 
 
-class BlockedKVAttentionTransform:  
+class BlockedKVAttentionTransform:
     _module_mapping = {
         QEffLlamaAttention,
     }
@@ -863,5 +863,24 @@ class BlockedKVAttentionTransform:
                 repl_module = type(module)
                 module.__class__ = repl_module
                 module.forward = MethodType(partial(repl_module.forward, num_kv_blocks=num_kv_blocks), module)
+                transformed = True  # Set to True if at least one transformation occurs
+        return model, transformed
+
+
+class PagedAttentionTransform:
+    _module_mapping = {
+        QEffLlamaAttention,
+    }
+
+    @classmethod
+    def apply(cls, model: nn.Module, num_kv_blocks_per_batch) -> Tuple[nn.Module, bool]:
+        transformed = False
+        for module in model.modules():
+            if type(module) in cls._module_mapping:
+                repl_module = type(module)
+                module.__class__ = repl_module
+                module.forward = MethodType(
+                    partial(repl_module.forward, num_kv_blocks_per_batch=num_kv_blocks_per_batch), module
+                )
                 transformed = True  # Set to True if at least one transformation occurs
         return model, transformed
