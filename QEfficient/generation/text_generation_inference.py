@@ -623,13 +623,16 @@ class QEffTextGenerationBase:
         decode_inputs = {}
 
         # num_kv_blocks = batch_size * self.num_kv_blocks_per_batch
-        # decode_inputs["block_table"] = np.arange(batch_size * self.num_kv_blocks_per_batch, dtype=np.int64).reshape(batch_size, self.num_kv_blocks_per_batch)
-        decode_inputs["block_table"] = np.array(
-            [[0, 1, -1, -1, -1, -1, -1, -1], [8, 9, -1, -1, -1, -1, -1, -1]]
-        ).reshape(batch_size, self.num_kv_blocks_per_batch)
+        decode_inputs["block_table"] = np.arange(batch_size * self.num_kv_blocks_per_batch, dtype=np.int64).reshape(
+            batch_size, self.num_kv_blocks_per_batch
+        )
+        # decode_inputs["block_table"] = np.array(
+        # [[0, 1, -1, -1, -1, -1, -1, -1], [8, 9, -1, -1, -1, -1, -1, -1]]
+        # ).reshape(batch_size, self.num_kv_blocks_per_batch)
         # slot_id_full = np.full((1, 1), 32, dtype=np.int64)
         # decode_inputs["slot_id"] = np.zeros((1), dtype=np.int64)
-        decode_inputs["slot_id"] = np.array([[0], [7]]).reshape(batch_size)
+        # decode_inputs["slot_id"] = np.array([[0], [7]]).reshape(batch_size)
+        decode_inputs["slot_id"] = np.array([[7], [0]]).reshape(batch_size)
         # decode_inputs["slot_id"] = np.array([[0], [0]]).reshape(batch_size)
         # decode_inputs["slot_id"] = np.concatenate((slot_id_full, slot_id_empty), axis=1)
         # decode_inputs["block_table"] = np.concatenate((block_id, slot_id), axis=2)
@@ -665,9 +668,9 @@ class QEffTextGenerationBase:
                 batch_lora_ids = [self._prompt_to_lora_id_mapping_decode.popleft() for i in range(self.batch_size)]
                 decode_inputs["lora_ids"] = np.array(batch_lora_ids, dtype=np.int64).reshape(self.batch_size, 1)
 
-        print('decode_inputs["position_ids"] = ', decode_inputs["position_ids"])
-        print('decode_inputs["block_table"] = ', decode_inputs["block_table"])
-        print('decode_inputs["slot_id"] = ', decode_inputs["slot_id"])
+        # print('decode_inputs["position_ids"] = ', decode_inputs["position_ids"])
+        # print('decode_inputs["block_table"] = ', decode_inputs["block_table"])
+        # print('decode_inputs["slot_id"] = ', decode_inputs["slot_id"])
 
         return decode_inputs
 
@@ -751,7 +754,7 @@ class QEffTextGenerationBase:
 
         """
         for decode_batch_id in range(self.full_batch_size):
-            print("decode_batch_id = ", decode_batch_id)
+            # print("decode_batch_id = ", decode_batch_id)
             next_prompt = prompt_queue.popleft()
             block_table = self.block_table[decode_batch_id].reshape(1, -1)
 
@@ -829,8 +832,8 @@ class QEffTextGenerationBase:
             # inputs["block_table"] = np.array([0, -1, -1, -1, -1, -1, -1, -1]).reshape(1, num_kv_blocks // 1)
             # inputs["slot_id"] = np.zeros((1), dtype=np.int64)
             inputs["slot_id"] = np.zeros((prefill_logit_bs), dtype=np.int64)
-            print('Prefill inputs["block_table"] = ', inputs["block_table"])
-            print('Prefill inputs["slot_id"] = ', inputs["slot_id"])
+            # print('Prefill inputs["block_table"] = ', inputs["block_table"])
+            # print('Prefill inputs["slot_id"] = ', inputs["slot_id"])
             # inputs["block_table"] = np.array([[0, -1, -1, -1, -1, -1, -1, -1], [8, -1, -1, -1, -1, -1, -1, -1]]).reshape(
             # 2, num_kv_blocks
             # )
@@ -879,14 +882,14 @@ class QEffTextGenerationBase:
             ]
             if self.include_sampler:
                 chunk_inputs["last_accepted_output_tokens"] = chunk_inputs["input_ids"]
-            print("chunk_inputs = ", chunk_inputs)
+            # print("chunk_inputs = ", chunk_inputs)
             outputs = self._session.run(chunk_inputs)
 
             if self._write_io_dir is not None:
                 # if 1:
                 write_io_files(inputs, outputs, "io_dir", "prefill", "aic_batch_io", True, False)
                 # write_io_files(inputs, outputs, self._write_io_dir, "prefill", "aic_batch_io", True, False)
-        print("prefill outputs = ", outputs)
+        # print("prefill outputs = ", outputs)
         # print("prefill outputs shapes:")
         # for key, value in outputs.items():
         # try:
@@ -1005,11 +1008,11 @@ class QEffTextGenerationBase:
                     decode_inputs["input_ids"][decode_batch_id, -1] = next_token_id[decode_batch_id, -1]
                     decode_inputs["position_ids"][decode_batch_id, -1] += 1
                     decode_inputs["slot_id"][decode_batch_id] += 1
-                    print('decode_inputs["slot_id"] = ', decode_inputs["slot_id"])
-                    print('decode_inputs["block_table"] = ', decode_inputs["block_table"])
-                    print('decode_inputs["batch_index"] = ', decode_inputs["batch_index"])
-                    print('decode_inputs["input_ids"] = ', decode_inputs["input_ids"])
-                    print('decode_inputs["position_ids"] = ', decode_inputs["position_ids"])
+                    # print('decode_inputs["slot_id"] = ', decode_inputs["slot_id"])
+                    # print('decode_inputs["block_table"] = ', decode_inputs["block_table"])
+                    # print('decode_inputs["batch_index"] = ', decode_inputs["batch_index"])
+                    # print('decode_inputs["input_ids"] = ', decode_inputs["input_ids"])
+                    # print('decode_inputs["position_ids"] = ', decode_inputs["position_ids"])
                     self.generated_ids[batch_id_map[decode_batch_id], generated_id_current_index[decode_batch_id]] = (
                         next_token_id[decode_batch_id, -1]
                     )
@@ -1191,15 +1194,17 @@ class TextGeneration:
             self._full_batch_size if self._full_batch_size is not None else self._qaic_model.batch_size
         )
         max_gen_length = self._ctx_len if not generation_len else max(self._ctx_len, generation_len)
-        # self._qaic_model.block_table = np.arange(execution_batch_size * self._num_kv_blocks_per_batch, dtype=np.int64).reshape(execution_batch_size, self._num_kv_blocks_per_batch)
-        self._qaic_model.block_table = np.array(
-            [[0, -1, -1, -1, -1, -1, -1, -1], [8, -1, -1, -1, -1, -1, -1, -1]]
+        self._qaic_model.block_table = np.arange(
+            execution_batch_size * self._num_kv_blocks_per_batch, dtype=np.int64
         ).reshape(execution_batch_size, self._num_kv_blocks_per_batch)
+        # self._qaic_model.block_table = np.array(
+        # [[0, -1, -1, -1, -1, -1, -1, -1], [8, -1, -1, -1, -1, -1, -1, -1]]
+        # ).reshape(execution_batch_size, self._num_kv_blocks_per_batch)
 
         # Create a prompt queue.
-        print("prompt = ", prompt)
+        # print("prompt = ", prompt)
         self._prompt_queue = deque(prompt)
-        print("self._prompt_queue = ", self._prompt_queue)
+        # print("self._prompt_queue = ", self._prompt_queue)
         # Initialize np arrays for storing the prefill output for all the decode batch size.
         num_prompts = len(self._prompt_queue)
 

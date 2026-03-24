@@ -224,16 +224,17 @@ def eager_attention_forward_pagedAttention(
 
     past_seen_tokens = cache_kwargs.get("past_seen_tokens")
     position_ids = cache_kwargs.get("position_ids")
-    block_table = cache_kwargs.get("block_table")  # [BS, num_kv_blocks/BS] -> each entry is block_id value
+    block_table = cache_kwargs.get("block_table")  # [BS, num_kv_blocks_per_batch] -> each entry is block_id value
     # block_size = -(-past_seen_tokens // num_kv_blocks)
     # block_size = 32
     # num_kv_blocks = 8
     # num_kv_blocks = -(batch_size * past_seen_tokens) // (-block_size)
     # num_kv_blocks = -(past_seen_tokens) // (-block_size)
     num_kv_blocks = num_kv_blocks_per_batch * batch_size
-    block_size = -(past_seen_tokens) // (-num_kv_blocks_per_batch)
+    # block_size = -(past_seen_tokens) // (-num_kv_blocks_per_batch)
+    block_size = past_key_value.get_seq_length() if past_key_value is not None else 0
     print("block_size in eager_attention_forward_pagedAttention = ", block_size)
-    print("past_seen_tokens in eager_attention_forward_pagedAttention = ", past_seen_tokens)
+    # print("past_seen_tokens in eager_attention_forward_pagedAttention = ", past_seen_tokens)
     print("batch_size = ", batch_size)
     print("num_kv_blocks = ", num_kv_blocks)
     print("num_kv_blocks_per_batch = ", num_kv_blocks_per_batch)
