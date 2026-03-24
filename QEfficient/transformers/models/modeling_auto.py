@@ -2533,8 +2533,8 @@ class QEFFAutoModelForCausalLM(QEFFBaseModel):
         str
             Path to the generated ONNX graph file.
         """
-        # bs: int = constants.ONNX_EXPORT_EXAMPLE_BATCH_SIZE
-        bs: int = 2
+        bs: int = constants.ONNX_EXPORT_EXAMPLE_BATCH_SIZE
+        # bs: int = 2
         seq_len: int = constants.ONNX_EXPORT_EXAMPLE_SEQ_LEN
         fbs: int = constants.ONNX_EXPORT_EXAMPLE_FBS
         # fbs: int = 2
