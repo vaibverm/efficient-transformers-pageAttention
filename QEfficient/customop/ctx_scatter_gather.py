@@ -71,7 +71,6 @@ def CtxScatterPagedAttention(
     exp_shape = ops.Concat(num_blocks, num_heads, seq_len, one, axis=0)
 
     # Create indices
-    # block_idx = ops.Expand(ops.Unsqueeze(ops.Range(zero, num_blocks, one), [1, 2, 3]), exp_shape)
     block_idx = ops.Expand(ops.Unsqueeze(block_index, [3]), exp_shape)
     head_idx = ops.Expand(ops.Unsqueeze(ops.Range(zero, num_heads, one), [0, 2, 3]), exp_shape)
     ctx_idx = ops.Expand(ops.Unsqueeze(position_ids, [1, 3]), exp_shape)
@@ -87,18 +86,9 @@ class CtxScatterFuncPagedAttention(torch.autograd.Function):
 
     @staticmethod
     def forward(data: torch.Tensor, block_index: torch.Tensor, position_ids: torch.Tensor, updates: torch.Tensor):
-        # block_index = torch.arange(data.shape[0]).view(-1, 1, 1)
-        # block_index = torch.tensor(block_index, dtype=torch.int32).view(-1, 1, 1)
         block_index = block_index.view(-1, 1, 1)
-        # print("data.shape[0] from CtxScatterFuncPagedAttention = ", data.shape[0])
         head_idx = torch.arange(data.shape[1]).view(1, -1, 1)
-        # ctx_idx = (position_ids.unsqueeze(0)).unsqueeze(1)
-        # ctx_idx = position_ids.view(1, 1, -1)
         ctx_idx = position_ids.unsqueeze(1)
-        print("block_index shape from CtxScatterFuncPagedAttention = ", block_index.shape)
-        print("head_idx shape from CtxScatterFuncPagedAttention = ", head_idx.shape)
-        print("ctx_idx shape from CtxScatterFuncPagedAttention = ", ctx_idx.shape)
-        print("updates shape from CtxScatterFuncPagedAttention = ", updates.shape)
         data[block_index, head_idx, ctx_idx] = updates
         return data
 
@@ -259,13 +249,9 @@ class CtxGatherFuncPagedAttention(torch.autograd.Function):
 
     @staticmethod
     def forward(data: torch.Tensor, block_indices: torch.Tensor, ctx_indices: torch.Tensor):
-        # batch_indices = torch.arange(data.shape[0]).view(-1, 1, 1)
         block_indices = block_indices.view(-1, 1, 1)
         head_indices = torch.arange(data.shape[1]).view(1, -1, 1)
-        # ctx_indices = torch.arange(data.shape[2]).view(1, 1, -1)
-        # ctx_indices = ctx_indices.view(1, 1, -1)
         ctx_indices = ctx_indices.unsqueeze(1)
-        print("ctx_indices in CtxGatherFuncPagedAttention = ", ctx_indices)
         return data[block_indices, head_indices, ctx_indices]
 
     @staticmethod

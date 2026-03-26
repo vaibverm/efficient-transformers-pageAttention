@@ -20,7 +20,6 @@ from QEfficient.customop.ctx_scatter_gather_cb import (
     CtxGatherFuncCB3D,
     CtxScatterFuncCB,
     CtxScatterFuncCB3D,
-    CtxScatterFuncPagedAttentionCB,
 )
 from QEfficient.customop.rms_norm import CustomRMSNormAIC, GemmaCustomRMSNormAIC
 
@@ -30,7 +29,6 @@ __all__ = [
     "CtxGatherFuncPagedAttention",
     "CtxScatterFunc",
     "CtxScatterFuncPagedAttention",
-    "CtxScatterFuncPagedAttentionCB",
     "CtxGatherFunc3D",
     "CtxScatterFunc3D",
     "CustomRMSNormAIC",

@@ -2391,7 +2391,6 @@ class QEFFAutoModelForCausalLM(QEFFBaseModel):
             self.model.qaic_config is not None
             and self.model.qaic_config.get("num_kv_blocks_per_batch", None) is not None
         ):
-            # BlockedKVAttentionTransform.apply(model, num_kv_blocks_per_batch=self.model.qaic_config.get("num_kv_blocks_per_batch"))
             PagedAttentionTransform.apply(
                 model, num_kv_blocks_per_batch=self.model.qaic_config.get("num_kv_blocks_per_batch")
             )
@@ -2534,23 +2533,14 @@ class QEFFAutoModelForCausalLM(QEFFBaseModel):
             Path to the generated ONNX graph file.
         """
         bs: int = constants.ONNX_EXPORT_EXAMPLE_BATCH_SIZE
-        # bs: int = 2
         seq_len: int = constants.ONNX_EXPORT_EXAMPLE_SEQ_LEN
         fbs: int = constants.ONNX_EXPORT_EXAMPLE_FBS
-        # fbs: int = 2
         # kv_cache_shape = get_padding_shape_from_config(self.model.config, fbs if self.continuous_batching else bs, seq_len)
         kv_cache_shape = get_padding_shape_from_config(self.model.config, fbs if self.continuous_batching else bs, 256)
         batch, num_kv_heads, CL, dh = kv_cache_shape
-        # kv_block_size = 32
-        # num_kv_blocks = (-batch * CL) // (-kv_block_size)
         num_kv_blocks_per_batch = self.model.qaic_config.get("num_kv_blocks_per_batch", 1)
         num_kv_blocks = batch * num_kv_blocks_per_batch
         kv_block_size = (-CL) // (-num_kv_blocks_per_batch)
-        print("CL in modelling_auto.py = ", CL)
-        print("num_kv_blocks in modelling_auto.py = ", num_kv_blocks)
-        print("num_kv_blocks_per_batch in modelling_auto.py = ", num_kv_blocks_per_batch)
-        print("batch in modelling_auto.py = ", batch)
-        print("kv_block_size in modelling_auto.py = ", kv_block_size)
         kv_cache_shape = [num_kv_blocks, num_kv_heads, kv_block_size, dh]
         example_inputs = {
             "input_ids": torch.zeros((bs, seq_len), dtype=torch.int64),
@@ -2558,20 +2548,7 @@ class QEFFAutoModelForCausalLM(QEFFBaseModel):
             "block_table": torch.arange((bs * num_kv_blocks_per_batch), dtype=torch.int64).view(
                 bs, num_kv_blocks_per_batch
             ),
-            # "block_table": torch.tensor(
-            # [[0, -1, -1, -1, -1, -1, -1, -1], [8, -1, -1, -1, -1, -1, -1, -1]], dtype=torch.int64
-            # ).view(bs, num_kv_blocks_per_batch),
-            # "block_table": torch.tensor([0, -1, -1, -1, -1, -1, -1, -1], dtype=torch.int64).view(
-            # bs, num_kv_blocks // bs
-            # ),
             "slot_id": torch.zeros(bs, dtype=torch.int64),
-            # "block_table": torch.cat(
-            #    (
-            #        torch.arange(num_kv_blocks, dtype=torch.int64).view(num_kv_blocks // bs, bs, 1),
-            #        torch.zeros((num_kv_blocks // bs, bs, 1), dtype=torch.int64),
-            #    ),
-            #    dim=2,
-            # ),
             "past_key_values": [[] for _ in range(self.num_layers)],
         }
         dynamic_axes = {
@@ -2591,8 +2568,6 @@ class QEFFAutoModelForCausalLM(QEFFBaseModel):
             }
         else:  # pkv is 4d
             pkv_dynamic_axes = {
-                # 0: "full_batch_size" if self.continuous_batching else "batch_size",
-                # 2: "ctx_len",
                 0: "num_kv_blocks" if self.continuous_batching else "num_kv_blocks",
                 2: "kv_block_size",
             }

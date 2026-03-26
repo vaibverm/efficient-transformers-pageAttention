@@ -44,10 +44,5 @@ def _create_causal_mask(
         kv_indices = torch.arange(start=start_index, end=target_length).view(1, 1, -1)
         attention_mask = kv_indices > query_indices
         attention_mask = attention_mask.unsqueeze(1)
-        print("start_index = ", start_index)
-        print("target_length = ", target_length)
-        print("query_indices shape = ", query_indices.shape)
-        print("kv_indices shape = ", kv_indices.shape)
-        print("attention_mask shape = ", attention_mask.shape)
 
     return attention_mask
