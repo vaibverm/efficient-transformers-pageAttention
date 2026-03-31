@@ -476,6 +476,7 @@ class QEffTextGenerationBase:
             full_batch_size if full_batch_size else self._fetch_full_batch_size()
         )  # Check and fetch full batch size if CB is enabled
         self.num_kv_blocks_per_batch = num_kv_blocks_per_batch if num_kv_blocks_per_batch else 1
+        self.kv_block_size = (-self._ctx_len) // (-self.num_kv_blocks_per_batch)
 
         # Initialize the storage variables.
         self.batch_index = None
@@ -622,7 +623,7 @@ class QEffTextGenerationBase:
         decode_inputs["block_table"] = np.arange(batch_size * self.num_kv_blocks_per_batch, dtype=np.int64).reshape(
             batch_size, self.num_kv_blocks_per_batch
         )
-        decode_inputs["slot_id"] = (self.decode_pos_ids % self.num_kv_blocks_per_batch).reshape(batch_size)
+        decode_inputs["slot_id"] = (self.decode_pos_ids % self.kv_block_size).reshape(batch_size)
 
         if self.is_tlm:
             position_ids = np.full((batch_size, self._decode_seq_len), -1, dtype=np.int64)
@@ -969,6 +970,7 @@ class QEffTextGenerationBase:
                     decode_inputs["input_ids"][decode_batch_id, -1] = next_token_id[decode_batch_id, -1]
                     decode_inputs["position_ids"][decode_batch_id, -1] += 1
                     decode_inputs["slot_id"][decode_batch_id] += 1
+                    decode_inputs["slot_id"][decode_batch_id] %= self.kv_block_size
                     self.generated_ids[batch_id_map[decode_batch_id], generated_id_current_index[decode_batch_id]] = (
                         next_token_id[decode_batch_id, -1]
                     )
@@ -1034,6 +1036,7 @@ class QEffTextGenerationBase:
             decode_inputs["input_ids"] = self._fetch_next_token_id(outputs)
             decode_inputs["position_ids"][:, -1] += 1
             decode_inputs["slot_id"][:] += 1
+            decode_inputs["slot_id"][:] %= self.kv_block_size
             cache_index += 1
             self.generated_ids[:, num_token] = decode_inputs["input_ids"][:, -1]
             finished_sequences |= decode_inputs["input_ids"] == self.tokenizer.eos_token_id

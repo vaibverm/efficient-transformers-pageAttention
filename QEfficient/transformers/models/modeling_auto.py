@@ -2533,14 +2533,17 @@ class QEFFAutoModelForCausalLM(QEFFBaseModel):
             Path to the generated ONNX graph file.
         """
         bs: int = constants.ONNX_EXPORT_EXAMPLE_BATCH_SIZE
-        seq_len: int = constants.ONNX_EXPORT_EXAMPLE_SEQ_LEN
+        # seq_len: int = constants.ONNX_EXPORT_EXAMPLE_SEQ_LEN
         fbs: int = constants.ONNX_EXPORT_EXAMPLE_FBS
-        # kv_cache_shape = get_padding_shape_from_config(self.model.config, fbs if self.continuous_batching else bs, seq_len)
-        kv_cache_shape = get_padding_shape_from_config(self.model.config, fbs if self.continuous_batching else bs, 256)
-        batch, num_kv_heads, CL, dh = kv_cache_shape
         num_kv_blocks_per_batch = self.model.qaic_config.get("num_kv_blocks_per_batch", 1)
+        # kv_cache_shape = get_padding_shape_from_config(self.model.config, fbs if self.continuous_batching else bs, seq_len)
+        kv_cache_shape = get_padding_shape_from_config(
+            self.model.config, fbs if self.continuous_batching else bs, num_kv_blocks_per_batch
+        )
+        batch, num_kv_heads, CL, dh = kv_cache_shape
         num_kv_blocks = batch * num_kv_blocks_per_batch
         kv_block_size = (-CL) // (-num_kv_blocks_per_batch)
+        seq_len: int = kv_block_size
         kv_cache_shape = [num_kv_blocks, num_kv_heads, kv_block_size, dh]
         example_inputs = {
             "input_ids": torch.zeros((bs, seq_len), dtype=torch.int64),
