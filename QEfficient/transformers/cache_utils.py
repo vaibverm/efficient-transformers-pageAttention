@@ -198,7 +198,7 @@ class QEffDynamicLayer(DynamicLayer):
             slot_id = cache_kwargs.get("slot_id")
             batch, num_kv_heads, seq_len, dh = key_states.shape
             num_kv_blocks, num_kv_heads, block_size, dh = self.keys.shape
-            block_index = position_ids[:, -1] // block_size  # Assuming only 1 block is written at max
+            block_index = position_ids.max(1).values // block_size  # Assuming only 1 block is written at max
             invalid_scatter_index = torch.iinfo(torch.int32).max
             ctx_indices = torch.arange(seq_len) + slot_id.unsqueeze(-1)
 
